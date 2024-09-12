@@ -20,3 +20,31 @@ Feature의 AddRenderPasses에서 Setup하면 출력이 안됨. OnCameraSetup에�
 2022버전에서는 
 RenderTargetIdentifier, RenderTargetHandle를 삭제하고 RTHandle로 바꿔야됨
 RenderingUtils.ReAllocateIfNeeded로 depthHandle과 normalHandle의 타겟 이름을 변경해야됨
+
+
+
+
+
+// 12/09/2024     addded unity 2022.3x version
+
+Depth2Global.cs
+2022버전에 맞게 RTHandle 기준으로 변경
+RenderQueueRange.All로 두어야 SpriteRenderer의 Depth와 DepthNormal이 렌더링됨
+
+CustomPostProcessingFeature.cs
+Postprocess Materail을 Blit하는 부분만 없음 
+각 스크립트에서 cmd.blit()에 포스트 프로세스 적용
+
+
+Depth2Global.cs
+Change based on RTHANDLE for 2022 version
+Only render setting.layer's target object
+RenderQueRange.All must be placed to render SpriteRender's Depth and DepthNormal
+
+CustomPostProcessingFeature.cs
+No part that blits the Postprocess Material
+Apply post-processing to cmd.blit() in each script
+
+translated by papago
+
+

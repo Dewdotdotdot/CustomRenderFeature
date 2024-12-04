@@ -53,7 +53,7 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 		{
 			if (settings.requireDepthNormals)
 				ConfigureInput(ScriptableRenderPassInput.Normal);
-		}
+        }
 		public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
 		{
 			var opaqueDesc = renderingData.cameraData.cameraTargetDescriptor;
@@ -64,13 +64,17 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 			rtCameraDepth = renderingData.cameraData.renderer.cameraDepthTargetHandle;
 			ConfigureTarget(rtCustomColor, rtCameraDepth);
 			ConfigureClear(ClearFlag.Color, new Color(0, 0, 0, 0));
-		}
+
+            source = renderingData.cameraData.renderer.cameraColorTargetHandle;
+            destination = renderingData.cameraData.renderer.cameraColorTargetHandle;
+        }
 		public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
 		{
 			if (renderingData.cameraData.postProcessEnabled == false)
 				return;
+			buffer.Clear();
 			CommandBuffer cmd = CommandBufferPool.Get(m_ProfilerTag);
-			
+			/*
 			using (new ProfilingScope(cmd, _profilingSampler))
 			{
 				context.ExecuteCommandBuffer(cmd);
@@ -86,13 +90,13 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 				}
 				context.DrawRenderers(renderingData.cullResults, ref drawingSettings, ref filteringSettings);
 			}
+			*/
 			
-			var opaqueDesc = renderingData.cameraData.cameraTargetDescriptor;
-			opaqueDesc.depthBufferBits = 0;
-			var renderer = renderingData.cameraData.renderer;
+			//var opaqueDesc = renderingData.cameraData.cameraTargetDescriptor;
+			//opaqueDesc.depthBufferBits = 0;
+			//var renderer = renderingData.cameraData.renderer;
 
 
-			//Debug
 			if(renderingData.cameraData.isSceneViewCamera)
             {
 				context.ExecuteCommandBuffer(cmd);
@@ -108,15 +112,17 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 			}
 			else if (settings.srcType == Target.TextureID)
 			{
+				var opaqueDesc = renderingData.cameraData.cameraTargetDescriptor;
 				RenderingUtils.ReAllocateIfNeeded(ref source, opaqueDesc, name: settings.srcTextureId);
 			}
 
 			if (settings.dstType == Target.CameraColor)
 			{
-				destination = renderer.cameraColorTargetHandle;
-			}
-			else if (settings.dstType == Target.TextureID)
+                //destination = renderingData.cameraData.renderer.cameraColorTargetHandle;
+            }
+            else if (settings.dstType == Target.TextureID)
 			{
+				var opaqueDesc = renderingData.cameraData.cameraTargetDescriptor;
 				RenderingUtils.ReAllocateIfNeeded(ref destination, opaqueDesc, name: settings.dstTextureId);
 			}
 
@@ -128,6 +134,7 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 
 			if (settings.dstType == Target.TextureID)
 			{
+				var opaqueDesc = renderingData.cameraData.cameraTargetDescriptor;
 				if (settings.overrideGraphicsFormat)
 				{
 					opaqueDesc.graphicsFormat = settings.graphicsFormat;
@@ -137,7 +144,22 @@ public class BlitProfile_Feature : ScriptableRendererFeature
             #endregion
 
             //ConfigureClear(ClearFlag.Color, Color.black);
-			//Vector3 cameraPos = renderingData.cameraData.camera.transform.position;
+
+            buffer.Clear();
+			Vector3 cameraPos = renderingData.cameraData.camera.transform.position;
+
+			CustomPostProcessing.SelectVolumes(v => v.sceneView, buffer);
+
+			Matrix4x4 clipToView = GL.GetGPUProjectionMatrix(renderingData.cameraData.camera.projectionMatrix, true).inverse;
+			Shader.SetGlobalMatrix("_ClipToView", clipToView);
+
+			if (buffer.Count == 0)
+			{
+				context.ExecuteCommandBuffer(cmd);
+				CommandBufferPool.Release(cmd);
+				return;
+			}
+
 
 			if (source == destination || (settings.srcType == settings.dstType && settings.srcType == Target.CameraColor))
 			{
@@ -145,8 +167,26 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 				{
 					Blitter.BlitCameraTexture(cmd, source, m_TemporaryColorTexture);
 
-					// Apply post-processing to cmd.blit() in each script  
-					//renderingData.cameraData.camera.EnqueueBuffer(cmd, ref renderingData, ref m_TemporaryColorTexture, ref m_TemporaryColorTexture_DoubleBuffer, cameraPos);
+					//씬 카메라만
+					/*
+					if (renderingData.cameraData.isSceneViewCamera)
+					{
+						buffer.Clear();
+						CustomPostProcessing.SelectVolumes(v => v.sceneView, buffer);
+						foreach (var effect in buffer)
+						{
+							//원인
+							effect.Render_ToCommandBuffer(cmd, ref renderingData, ref m_TemporaryColorTexture, ref m_TemporaryColorTexture_DoubleBuffer, cameraPos);
+						}
+						//renderingData.cameraData.camera.EnqueueBuffer(cmd, ref renderingData, ref m_TemporaryColorTexture, ref m_TemporaryColorTexture_DoubleBuffer, cameraPos);
+					}
+					
+					else  //실제 적용
+					{
+						renderingData.cameraData.camera.EnqueueBuffer(cmd, ref renderingData, ref m_TemporaryColorTexture, ref m_TemporaryColorTexture_DoubleBuffer, cameraPos);
+					}
+					*/
+					renderingData.cameraData.camera.EnqueueBuffer(cmd, ref renderingData, ref m_TemporaryColorTexture, ref m_TemporaryColorTexture_DoubleBuffer, cameraPos);
 					Blitter.BlitCameraTexture(cmd, m_TemporaryColorTexture, source);
 				}
 			}
@@ -155,7 +195,7 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 		}
         public override void FrameCleanup(CommandBuffer cmd)
         {
-            base.FrameCleanup(cmd);
+            //base.FrameCleanup(cmd);
         }
 
         public void ReleaseTarget()
@@ -226,8 +266,7 @@ public class BlitProfile_Feature : ScriptableRendererFeature
 		if (IsPostProcessEnabled(_universalRendererData, ref renderingData) == false)
 			return;*/
 
-		//Only on GameScene
-		if (renderingData.cameraData.isSceneViewCamera || renderingData.cameraData.isPreviewCamera)
+		if (renderingData.cameraData.isSceneViewCamera || renderingData.cameraData.isPreviewCamera || renderingData.cameraData.cameraType == CameraType.Reflection) 
 			return;
 
 		blitPass.Setup(renderer);

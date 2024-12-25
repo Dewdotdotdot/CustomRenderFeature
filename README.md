@@ -48,3 +48,10 @@ Apply post-processing to cmd.blit() in each script
 translated by papago
 
 
+// 12/25/2024
+
+Depth2Global.cs
+optimize changed
+
+Reduce SetPass Calls
+Added useLayerSetting if-else	

@@ -1,10 +1,12 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
-public class Depth2Global : ScriptableRendererFeature
+public class Depth2Global : ScriptableRendererFeature           //1219  CameraDepthTexture 2번 Render 되는 문제만 : 엔진 문제
 {
 
     public class Depth2GlobalPass : ScriptableRenderPass
@@ -26,22 +28,32 @@ public class Depth2Global : ScriptableRendererFeature
         public Depth2GlobalPass(RenderPassEvent renderPassEvent, ref Depth2GlobalPass_Setting setting, string tag)
         {
             this.setting = setting;
-            this.renderPassEvent = renderPassEvent + setting.passEventOffset + 2;
+            this.renderPassEvent = renderPassEvent;
 
             //Important
             filteringSettings = new FilteringSettings(setting.queueRange, setting.layer);
-
+            /*
             shaderTagIds.Add(new ShaderTagId("SRPDefaultUnlit"));
-            shaderTagIds.Add(new ShaderTagId("UniversalForward"));
+            shaderTagIds.Add(new ShaderTagId("UniversalForward"));  
             shaderTagIds.Add(new ShaderTagId("UniversalForwardOnly"));
             shaderTagIds.Add(new ShaderTagId("Universal2D"));   //2D
-            shaderTagIds.Add(new ShaderTagId("DepthOnly"));
-            shaderTagIds.Add(new ShaderTagId("DepthNormals"));
+            */
+            if (setting.Depth)
+            {
+                shaderTagIds.Add(new ShaderTagId("DepthOnly"));
+   
+            }
+            if(setting.NormalDepth)
+            {
+                shaderTagIds.Add(new ShaderTagId("DepthNormals"));
+            }
+            //shaderTagIds.Add(new ShaderTagId("DepthOnly"));
+            //shaderTagIds.Add(new ShaderTagId("DepthNormals"));
 
 
-            m_ProfilingSampler = new ProfilingSampler(tag);
-            //depthHandle = RTHandles.Alloc(setting.propertyName);
-            //normalHandle = RTHandles.Alloc(setting.normalName);
+            //m_ProfilingSampler = new ProfilingSampler(tag);
+            depthHandle = RTHandles.Alloc(setting.propertyName);
+            normalHandle = RTHandles.Alloc(setting.normalName);
 
             //depthHandleTemp = RTHandles.Alloc("_TempDepth");
             //normalHandleTemp = RTHandles.Alloc("_TempNormal");
@@ -63,41 +75,86 @@ public class Depth2Global : ScriptableRendererFeature
             //sourceHandle = renderingData.cameraData.renderer.cameraColorTargetHandle;
             //colorDesc.depthBufferBits = 0;
 
-            ///Depth
-            var depthDesc = new RenderTextureDescriptor(desc.width, desc.height, RenderTextureFormat.Depth, 8);
-            depthDesc.depthBufferBits = 32;
-            //Blitter.BlitCameraTexture(cmd, renderingData.cameraData.renderer.cameraDepthTargetHandle, depthHandle);
-            RenderingUtils.ReAllocateIfNeeded(ref depthHandle, depthDesc, FilterMode.Point, TextureWrapMode.Clamp, name: setting.propertyName);
+            if (setting.Depth == true)
+            {
+                ///Depth
+                var depthDesc = new RenderTextureDescriptor(desc.width, desc.height, RenderTextureFormat.Depth);
+                depthDesc.depthBufferBits = 32;
+                //Blitter.BlitCameraTexture(cmd, renderingData.cameraData.renderer.cameraDepthTargetHandle, depthHandle);
+                //depthHandle.Release();
+                RenderingUtils.ReAllocateIfNeeded(ref depthHandle, depthDesc, FilterMode.Point, TextureWrapMode.Clamp, name: setting.propertyName);
+            }
 
-            ///DepthNormal
-            var normalDesc = new RenderTextureDescriptor(desc.width, desc.height, RenderTextureFormat.ARGB32, 0);
-            RenderingUtils.ReAllocateIfNeeded(ref normalHandle, normalDesc, FilterMode.Point, TextureWrapMode.Clamp, name: setting.normalName);
+
+            if(setting.NormalDepth == true)
+            {
+                ///DepthNormal
+                var normalDesc = new RenderTextureDescriptor(desc.width, desc.height, RenderTextureFormat.ARGB32, 0);
+                //normalHandle.Release();       //버그인듯 복사됨
+                RenderingUtils.ReAllocateIfNeeded(ref normalHandle, normalDesc, FilterMode.Point, TextureWrapMode.Clamp, name: setting.normalName);
+            }
+
+
+            if( setting.Depth || setting.NormalDepth )
+            {
+                ConfigureTarget(normalHandle, depthHandle);
+            }
 
             ///On Grabpass
             //ConfigureTarget(new RTHandle[] { sourceHandle, normalHandle }, depthHandle);
-            ConfigureTarget(normalHandle, depthHandle);
+
             ConfigureClear(ClearFlag.All, Color.black);
         }
 
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             CommandBuffer cmd = CommandBufferPool.Get();
-
-            using (new ProfilingScope(cmd, m_ProfilingSampler))
+            
+            if(setting.useLayerSetting == true)
             {
-                context.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
-                SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
-                DrawingSettings drawingSettings = CreateDrawingSettings(shaderTagIds, ref renderingData, sortingCriteria);
-                context.DrawRenderers(renderingData.cullResults, ref drawingSettings, ref filteringSettings);
+                using (new ProfilingScope(cmd, m_ProfilingSampler))
+                {
+                    context.ExecuteCommandBuffer(cmd);
+                    cmd.Clear();
+
+                    SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
+                    renderingData.supportsDynamicBatching = true;
+
+                    DrawingSettings drawingSettings;
+                    if (setting.Depth)
+                    {
+                        drawingSettings = CreateDrawingSettings(shaderTagIds[0], ref renderingData, sortingCriteria);
+                        drawingSettings.enableDynamicBatching = true;
+                        drawingSettings.enableInstancing = true;
+                        context.DrawRenderers(renderingData.cullResults, ref drawingSettings, ref filteringSettings);
+                        cmd.SetGlobalTexture(setting.propertyName, depthHandle);
+                    }
+
+
+
+                    if (setting.NormalDepth)
+                    {
+                        drawingSettings = CreateDrawingSettings(shaderTagIds[1], ref renderingData, sortingCriteria);
+                        drawingSettings.enableDynamicBatching = true;
+                        drawingSettings.enableInstancing = true;
+                        context.DrawRenderers(renderingData.cullResults, ref drawingSettings, ref filteringSettings);
+                        cmd.SetGlobalTexture(setting.normalName, normalHandle);
+                    }
+                }
+            }
+            else
+            {
+                if (setting.Depth)
+                {
+                    cmd.SetGlobalTexture(setting.propertyName, depthHandle);
+                }
+                if (setting.NormalDepth)
+                {
+                    cmd.SetGlobalTexture(setting.normalName, normalHandle);
+                }
             }
 
-            cmd.SetGlobalTexture(setting.propertyName, depthHandle);
-            cmd.SetGlobalTexture(setting.normalName, normalHandle);
-
-            Matrix4x4 clipToView = GL.GetGPUProjectionMatrix(renderingData.cameraData.camera.projectionMatrix, true).inverse;
-            Shader.SetGlobalMatrix("_ClipToView", clipToView);
-
+            
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
             CommandBufferPool.Release(cmd);
@@ -123,20 +180,22 @@ public class Depth2Global : ScriptableRendererFeature
     [System.Serializable]
     public class Depth2GlobalPass_Setting
     {
-        public string propertyName = "_DepthTexture";
-        public RenderPassEvent passEvent = RenderPassEvent.AfterRenderingGbuffer;
+        [Header("Setting")]
+        public RenderPassEvent passEvent = RenderPassEvent.AfterRenderingPrePasses;
         public RenderQueueRange queueRange = RenderQueueRange.all;
-        public int passEventOffset = 4;
+        public bool useLayerSetting = false;
         public LayerMask layer;
+
+        [Header("dEPTH")]
+        public bool Depth = false;
+        public string propertyName = "_DepthTexture";
 
         [Header("Normal")]
         public bool NormalDepth = false;
         public string normalName = "_CustomNormalTexture";
-        public int passEventOffset_Normal = 6;
     }
 
     #region Field
-    public List<ShaderTagId> shaderTagIds = new List<ShaderTagId>(); 
 
     public Depth2GlobalPass pass;
     public Depth2GlobalPass_Setting setting;
@@ -150,7 +209,7 @@ public class Depth2Global : ScriptableRendererFeature
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
         
-        if (renderingData.cameraData.isSceneViewCamera)
+        if (renderingData.cameraData.isSceneViewCamera || renderingData.cameraData.isPreviewCamera)
             return;
 
         pass.ConfigureInput(ScriptableRenderPassInput.Normal | ScriptableRenderPassInput.Depth);
@@ -160,14 +219,13 @@ public class Depth2Global : ScriptableRendererFeature
 
     public override void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData)
     {
-        RTHandle color = renderer.cameraColorTargetHandle;
-        RTHandle depth = renderer.cameraDepthTargetHandle;
+        //RTHandle color = renderer.cameraColorTargetHandle;
+        //RTHandle depth = renderer.cameraDepthTargetHandle;
         //pass.Setup(color, depth); //ArgumentException: An item with the same key has already been added
     }
 
     protected override void Dispose(bool disposing)
     {
-       
         pass.ReleaseTarget();
     }
     #endregion
